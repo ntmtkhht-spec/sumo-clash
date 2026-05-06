@@ -1,0 +1,26 @@
+{
+  "name": "@sumo/server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "colyseus": "^0.17.0",
+    "@colyseus/core": "^0.17.0",
+    "@colyseus/schema": "^4.0.7",
+    "@colyseus/monitor": "^0.17.0",
+    "@colyseus/ws-transport": "^0.17.0",
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "@sumo/shared": "*"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.12.11",
+    "tsx": "^4.9.3",
+    "typescript": "^5.4.5"
+  }
+}

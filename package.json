@@ -1,0 +1,23 @@
+{
+  "name": "sumo-clash",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @sumo/server\" \"npm run dev -w @sumo/client\"",
+    "build": "npm run build -w @sumo/server && npm run build -w @sumo/client",
+    "test": "npm run test -w @sumo/shared"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5",
+    "@typescript-eslint/eslint-plugin": "^7.8.0",
+    "@typescript-eslint/parser": "^7.8.0",
+    "eslint": "^8.57.0"
+  }
+}
