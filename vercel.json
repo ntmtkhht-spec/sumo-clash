@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build -w @sumo/client",
+  "outputDirectory": "packages/client/dist",
+  "installCommand": "npm install",
+  "framework": "vite"
+}
