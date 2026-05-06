@@ -195,7 +195,7 @@ joinBtn.addEventListener("click", () => {
 
 async function startLobby(username: string, mapId: string) {
   statusEl.innerText = "Connecting to matchmaking server...";
-  const client = new Client("ws://localhost:2567");
+  const client = new Client("wss://sumo-clash-server.onrender.com");
 
   try {
     room = await client.joinOrCreate("battle", { username, mapId });
