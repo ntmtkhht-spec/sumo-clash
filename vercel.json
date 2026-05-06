@@ -3,5 +3,6 @@
   "outputDirectory": "packages/client/dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
   "installCommand": "npm install",
-  "framework": "vite"
+  "framework": "vite",
+  "root": "."
 }
