@@ -842,17 +842,16 @@ function renderGame() {
       ct.visible = true;
       ct.text = timerVal.toString();
       ct.style.fill = 0xfacc15; // Yellow countdown
-      ct.x = window.innerWidth / 2;
-      ct.y = window.innerHeight / 2;
+      ct.x = window.innerWidth / 2 / viewScale;
+      ct.y = window.innerHeight / 2 / viewScale;
       const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
       ct.scale.set(pulse);
     } else if (currentPhase === "playing" && localState.matchTimer > 88) {
-        // Show "GO!" for 2 seconds
         ct.visible = true;
         ct.text = "GO!";
-        ct.style.fill = 0x4ade80; // Green
-        ct.x = window.innerWidth / 2;
-        ct.y = window.innerHeight / 2;
+        ct.style.fill = 0x4ade80;
+        ct.x = window.innerWidth / 2 / viewScale;
+        ct.y = window.innerHeight / 2 / viewScale;
         ct.scale.set(1.2);
     } else {
       ct.visible = false;
