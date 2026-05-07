@@ -228,13 +228,41 @@ async function wakeUpServer() {
 }
 wakeUpServer();
 
+function resetGameState() {
+  localState = null;
+  lastAckedSeq = 0;
+  smoothOffsetX = 0;
+  smoothOffsetY = 0;
+  pendingInputs.length = 0;
+  nextSeq = 1;
+  snapshotBuffer.length = 0;
+  lastLocalAlive = true;
+  lastLocalVx = 0;
+  lastLocalVy = 0;
+  lastKillHash = "";
+  screenShakeAmount = 0;
+  renderLogOnce = false;
+  particles.length = 0;
+  playerGraphicsMap.clear();
+  playerNameTextMap.clear();
+  powerupGraphicsMap.clear();
+  hazardGraphicsMap.clear();
+  if (app) { app.destroy(true); app = null; }
+  document.getElementById("lost-overlay")?.remove();
+  document.getElementById("countdown-overlay")?.remove();
+}
+
 async function startLobby(username: string, mapId: string) {
-  statusEl.innerText = "Connecting to matchmaking server...";
+  resetGameState();
+
+  // Show connecting screen
+  document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;
+    height:100vh;background:#0d1117;color:#e2e8f0;font-family:'Outfit','Inter',sans-serif;
+    font-size:24px;font-weight:700;">Connecting...</div>`;
+
   const isDev = import.meta.env.DEV;
   const serverUrl = import.meta.env.VITE_SERVER_URL || (isDev ? "ws://127.0.0.1:2567" : "wss://sumo-clash-server.onrender.com");
-  
   console.log(`[SUMO] Connecting to: ${serverUrl} (Dev: ${isDev})`);
-  statusEl.innerText = `Connecting to ${isDev ? 'Local' : 'Production'} Server...`;
   
   const client = new Client(serverUrl);
 
@@ -243,7 +271,7 @@ async function startLobby(username: string, mapId: string) {
     room = await client.joinOrCreate("battle", { username, mapId });
     const duration = Date.now() - startTime;
     console.log(`[SUMO] Room joined in ${duration}ms, sessionId:`, room.sessionId);
-    statusEl.innerText = `Connected in ${duration}ms! Initializing renderer...`;
+    console.log(`[SUMO] Connected in ${duration}ms`);
 
     // Initialize PixiJS Application
     app = new Application();
@@ -517,7 +545,9 @@ async function startLobby(username: string, mapId: string) {
     errDiv.style.cssText = "position:fixed;top:0;left:0;right:0;background:red;color:white;padding:16px;z-index:9999;font-family:monospace;white-space:pre-wrap;";
     errDiv.textContent = "[startLobby] " + (err?.stack || err?.message || String(err));
     document.body.appendChild(errDiv);
-    if (statusEl?.parentNode) statusEl.innerText = "Connection failed!";
+    document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;
+      height:100vh;background:#0d1117;color:#ef4444;font-family:'Outfit','Inter',sans-serif;
+      font-size:24px;font-weight:700;">Connection failed!</div>`;
   }
 }
 
@@ -630,11 +660,11 @@ function renderGame() {
           lostEl.remove();
         });
         document.getElementById("rejoin-btn")?.addEventListener("click", () => {
+          const playerName = camPlayer.name || "Guest";
+          const currentMap = localState?.mapId || "classic";
           lostEl.remove();
           room.leave();
-          const nameInput = document.querySelector("#username-input") as HTMLInputElement;
-          const mapSel = document.querySelector("#map-select") as HTMLSelectElement;
-          startLobby(nameInput?.value || camPlayer.name || "Guest", mapSel?.value || localState?.mapId || "classic");
+          startLobby(playerName, currentMap);
         });
       }
     }

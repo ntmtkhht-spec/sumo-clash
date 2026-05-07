@@ -13,7 +13,7 @@ export const PHYSICS = {
   FRICTION: 4.0,
   COLLISION_RESTITUTION: 0.85,
   PUSH_FORCE_MULTIPLIER: 1.5,
-  DASH_THRUST: 1200,
+  DASH_THRUST: 1800,
   DASH_DURATION: 1.4,
   DASH_COOLDOWN: 5.0,
   ARENA_RADIUS_DEFAULT: 700,
@@ -164,14 +164,17 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
         player.vx += (ax / dist) * PHYSICS.DASH_THRUST * dt;
         player.vy += (ay / dist) * PHYSICS.DASH_THRUST * dt;
       } else if (player.dashTimer > 0) {
-        // No direction input during dash → thrust forward (up)
-        player.vy -= PHYSICS.DASH_THRUST * dt;
+        // No direction input → thrust in velocity direction
+        const vLen = Math.sqrt(player.vx * player.vx + player.vy * player.vy) || 1;
+        player.vx += (player.vx / vLen) * PHYSICS.DASH_THRUST * dt;
+        player.vy += (player.vy / vLen) * PHYSICS.DASH_THRUST * dt;
       }
     }
 
-    // Apply friction
-    player.vx *= Math.exp(-PHYSICS.FRICTION * dt);
-    player.vy *= Math.exp(-PHYSICS.FRICTION * dt);
+    // Apply friction (reduced during dash for rocket feel)
+    const friction = player.dashTimer > 0 ? PHYSICS.FRICTION * 0.15 : PHYSICS.FRICTION;
+    player.vx *= Math.exp(-friction * dt);
+    player.vy *= Math.exp(-friction * dt);
 
     // Limit max speed
     const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
