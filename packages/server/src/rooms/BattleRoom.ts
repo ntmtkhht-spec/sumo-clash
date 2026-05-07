@@ -32,8 +32,9 @@ export class BattleRoom extends Room<any> {
   lastSeq = new Map<string, number>();
 
   powerupTimer = 10;
-  bumperTimer = 15; // Bumpers start appearing after 15s
+  bumperTimer = 15;
   countdownStarted: boolean = false;
+  accumulatedTime: number = 0;
 
   onCreate(options: any) {
     this.setState(new GameState());
@@ -52,7 +53,11 @@ export class BattleRoom extends Room<any> {
     });
 
     this.setSimulationInterval((dt: number) => {
-      this.update(dt / 1000);
+      this.accumulatedTime += dt / 1000;
+      while (this.accumulatedTime >= PHYSICS.TICK_DT) {
+        this.update(PHYSICS.TICK_DT);
+        this.accumulatedTime -= PHYSICS.TICK_DT;
+      }
     }, 1000 / PHYSICS.TICK_RATE_HZ);
     
     console.log("BattleRoom created with map:", this.state.mapId, this.roomId);

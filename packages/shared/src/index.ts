@@ -92,7 +92,7 @@ export interface PlayerInput {
 /**
  * Deterministic physics step function for shared use by server and client.
  */
-export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, dt: number, updateGlobalState: boolean = true) {
+export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, dt: number, updateGlobalState: boolean = true, skipCollisions: boolean = false) {
   // 1. Process arena shrinking
   if (updateGlobalState && state.matchPhase === "playing") {
     state.matchTimer = Math.max(0, state.matchTimer - dt);
@@ -191,6 +191,8 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
   }
 
   // 3. Move hazards and check hazard collision
+  if (skipCollisions) return; // Replay only needs movement, not collisions
+
   for (const hazard of state.hazards) {
     // Simple orbital motion for hazards
     if (updateGlobalState) {

@@ -71,6 +71,12 @@ function spawnParticles(x: number, y: number, count: number, color: number, spee
 let localState: GameState | null = null;
 let lastAckedSeq: number = 0;
 
+// Smoothing: visual offset that decays exponentially toward zero
+const SMOOTH_RATE = 18.0;
+const SNAP_THRESHOLD = 80.0;
+let smoothOffsetX = 0;
+let smoothOffsetY = 0;
+
 // Prediction replay buffer
 interface InputRecord {
   seq: number;
@@ -344,24 +350,40 @@ async function startLobby(username: string, mapId: string) {
         lPlayer.ghostTimer = sPlayer.ghostTimer;
 
         if (sPlayer.id === room.sessionId) {
-          const dx = lPlayer.x - sPlayer.x;
-          const dy = lPlayer.y - sPlayer.y;
+          // Save old predicted position for smoothing
+          const oldPredX = lPlayer.x;
+          const oldPredY = lPlayer.y;
 
-          // Increase threshold to 5.0 to avoid micro-jitter from float drift
-          if (Math.sqrt(dx * dx + dy * dy) > 5.0) {
-            lPlayer.x = sPlayer.x;
-            lPlayer.y = sPlayer.y;
-            lPlayer.vx = sPlayer.vx;
-            lPlayer.vy = sPlayer.vy;
-            lPlayer.stunTimer = sPlayer.stunTimer;
+          // Always reset to server authoritative state
+          lPlayer.x = sPlayer.x;
+          lPlayer.y = sPlayer.y;
+          lPlayer.vx = sPlayer.vx;
+          lPlayer.vy = sPlayer.vy;
+          lPlayer.stunTimer = sPlayer.stunTimer;
 
-            const toReplay = pendingInputs.filter(item => item.seq > lastAckedSeq);
-            for (const item of toReplay) {
-              const inMap = new Map<string, PlayerInput>();
-              inMap.set(room.sessionId, item.input);
-              // Pass false for updateGlobalState to only replay player movement
-              stepPhysics(localState, inMap, 1 / 60, false);
-            }
+          // Replay unacknowledged inputs (movement only, skip collisions)
+          const toReplay = pendingInputs.filter(item => item.seq > lastAckedSeq);
+          for (const item of toReplay) {
+            const inMap = new Map<string, PlayerInput>();
+            inMap.set(room.sessionId, item.input);
+            stepPhysics(localState, inMap, 1 / 60, false, true);
+          }
+
+          // Compute smoothing offset: difference between old visual and new predicted
+          const newPredX = lPlayer.x;
+          const newPredY = lPlayer.y;
+          const correctionDist = Math.sqrt(
+            (oldPredX - newPredX) ** 2 + (oldPredY - newPredY) ** 2
+          );
+
+          if (correctionDist > SNAP_THRESHOLD) {
+            // Teleport: too far, hard snap (no smoothing)
+            smoothOffsetX = 0;
+            smoothOffsetY = 0;
+          } else {
+            // Accumulate offset: visual stays at old position, decays toward new
+            smoothOffsetX += oldPredX - newPredX;
+            smoothOffsetY += oldPredY - newPredY;
           }
         } else {
           lPlayer.x = sPlayer.x;
@@ -511,6 +533,15 @@ function renderGame() {
 
   const now = Date.now();
 
+  // Decay smoothing offset exponentially
+  const renderDt = app.ticker.deltaMS / 1000;
+  const decay = Math.exp(-SMOOTH_RATE * renderDt);
+  smoothOffsetX *= decay;
+  smoothOffsetY *= decay;
+  // Kill tiny residual
+  if (Math.abs(smoothOffsetX) < 0.1) smoothOffsetX = 0;
+  if (Math.abs(smoothOffsetY) < 0.1) smoothOffsetY = 0;
+
   // Compute interpolated positions for remote players from snapshot buffer
   const interpolatedPositions = new Map<string, { x: number; y: number }>();
   if (snapshotBuffer.length >= 2) {
@@ -574,7 +605,8 @@ function renderGame() {
         spawnParticles(camPlayer.x, camPlayer.y, 15, 0xffffff, 1.5);
       }
       lastLocalVx = camPlayer.vx; lastLocalVy = camPlayer.vy;
-      ox = cx - camPlayer.x; oy = cy - camPlayer.y;
+      ox = cx - (camPlayer.x + smoothOffsetX);
+      oy = cy - (camPlayer.y + smoothOffsetY);
     }
   }
 
@@ -711,11 +743,11 @@ function renderGame() {
     const isLocal = player.id === room.sessionId;
     const radius = player.radius || 30;
 
-    // Use interpolated position for remote players, predicted for local
+    // Use interpolated position for remote players, smoothed predicted for local
     let px: number, py: number;
     if (isLocal && lp?.alive) {
-      px = lp.x;
-      py = lp.y;
+      px = lp.x + smoothOffsetX;
+      py = lp.y + smoothOffsetY;
     } else if (!isLocal) {
       const interp = interpolatedPositions.get(player.id);
       if (interp) {
