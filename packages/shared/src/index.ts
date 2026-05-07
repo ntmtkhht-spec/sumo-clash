@@ -23,6 +23,8 @@ export const PHYSICS = {
   RADIUS_GROWTH_PER_SECOND: 0.6,
   MAX_MASS: 3.0,
   MAX_RADIUS: 60,
+  BUMPER_MAX: 8,
+  HIT_SOUND_THRESHOLD: 220,
 };
 
 export class Player extends Schema {

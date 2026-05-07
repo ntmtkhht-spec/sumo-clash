@@ -160,16 +160,20 @@ export class BattleRoom extends Room<any> {
       this.bumperTimer -= dt;
       if (this.bumperTimer <= 0) {
         this.bumperTimer = 8; // New bumper every 8 seconds
-        const bumper = new Hazard();
-        bumper.id = `bumper_${Date.now()}`;
-        bumper.type = "bumper";
-        const angle = Math.random() * Math.PI * 2;
-        const dist = Math.random() * (this.state.arenaRadius - 100);
-        bumper.x = Math.cos(angle) * dist;
-        bumper.y = Math.sin(angle) * dist;
-        bumper.radius = 25 + Math.random() * 15;
-        this.state.hazards.push(bumper);
-        console.log("Bumper spawned at", bumper.x, bumper.y);
+        // Cap bumpers to prevent unbounded growth
+        const bumperCount = this.state.hazards.filter((h: any) => h.type === "bumper").length;
+        if (bumperCount < PHYSICS.BUMPER_MAX) {
+          const bumper = new Hazard();
+          bumper.id = `bumper_${Date.now()}`;
+          bumper.type = "bumper";
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * (this.state.arenaRadius - 100);
+          bumper.x = Math.cos(angle) * dist;
+          bumper.y = Math.sin(angle) * dist;
+          bumper.radius = 25 + Math.random() * 15;
+          this.state.hazards.push(bumper);
+          console.log("Bumper spawned at", bumper.x, bumper.y);
+        }
       }
 
       const alivePlayers = this.state.players.filter((p: Player) => p.alive);
@@ -197,19 +201,22 @@ export class BattleRoom extends Room<any> {
     // 2. Clear out input map
     this.inputs.clear();
 
-    // 3. Process buffered client inputs
+    // 3. Process buffered client inputs - accumulate all, not just last
     for (const [sessionId, buffered] of this.inputBuffer.entries()) {
       const player = this.state.players.find((p: Player) => p.id === sessionId);
       if (!player || !player.alive || this.state.matchPhase !== "playing") continue;
 
       if (buffered.length > 0) {
+        // Use last input's direction (most recent intent)
         const lastInput = buffered[buffered.length - 1];
+        // Accumulate dash across ALL buffered inputs so one-shot dashes aren't lost
+        const dashAccum = buffered.some(inp => inp.dash);
         this.inputs.set(sessionId, {
           up: lastInput.up,
           down: lastInput.down,
           left: lastInput.left,
           right: lastInput.right,
-          dash: lastInput.dash
+          dash: dashAccum
         });
         this.lastSeq.set(sessionId, lastInput.seq);
         this.inputBuffer.set(sessionId, []);
@@ -231,6 +238,25 @@ export class BattleRoom extends Room<any> {
     for (const p of this.state.players) wasAlive.set(p.id, p.alive);
 
     stepPhysics(this.state, this.inputs, dt);
+
+    // Validate player speeds (anti-cheat)
+    const maxValidSpeed = PHYSICS.PLAYER_MAX_SPEED * 1.5 + PHYSICS.DASH_IMPULSE + 200;
+    for (const player of this.state.players) {
+      if (!player.alive) continue;
+      const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+      if (speed > maxValidSpeed) {
+        const scale = maxValidSpeed / speed;
+        player.vx *= scale;
+        player.vy *= scale;
+      }
+      // Clamp position to arena bounds
+      const distFromCenter = Math.sqrt(player.x * player.x + player.y * player.y);
+      if (distFromCenter > this.state.arenaRadius + player.radius) {
+        const clampScale = (this.state.arenaRadius - player.radius) / distFromCenter;
+        player.x *= clampScale;
+        player.y *= clampScale;
+      }
+    }
 
     // 6. Check for new deaths
     for (const player of this.state.players) {

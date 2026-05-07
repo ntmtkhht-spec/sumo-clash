@@ -102,6 +102,18 @@ const playerNameTextMap = new Map<string, Text>();
 let hudText: Text;
 let scoreboardText: Text;
 
+// Performance caches
+const colorCache = new Map<string, number>();
+function parseColor(hex: string): number {
+  let c = colorCache.get(hex);
+  if (c === undefined) {
+    c = hex.startsWith("#") ? (parseInt(hex.slice(1), 16) || 0x3b82f6) : 0x3b82f6;
+    colorCache.set(hex, c);
+  }
+  return c;
+}
+let lastKillHash = "";
+
 // Killfeed state
 const killfeedEl = document.createElement("div");
 killfeedEl.className = "killfeed-container";
@@ -367,54 +379,58 @@ async function startLobby(username: string, mapId: string) {
           lPlayer.vy = sPlayer.vy;
         }
       }
+
+      // Sync hazards to local state
+      localState.hazards.clear();
+      if (state.hazards) {
+        for (const sh of state.hazards) {
+          const lh = new Hazard();
+          lh.id = sh.id; lh.type = sh.type;
+          lh.x = sh.x; lh.y = sh.y; lh.radius = sh.radius;
+          localState.hazards.push(lh);
+        }
+      }
+
+      // Sync powerups to local state + detect collection for sound
+      const prevPuIds = new Set<string>();
+      for (const lp of localState.powerups) prevPuIds.add(lp.id);
+
+      localState.powerups.clear();
+      if (state.powerups) {
+        for (const sp of state.powerups) {
+          const lp = new PowerUp();
+          lp.id = sp.id; lp.type = sp.type;
+          lp.x = sp.x; lp.y = sp.y; lp.radius = sp.radius;
+          localState.powerups.push(lp);
+        }
+      }
+
+      // Play pickup sound for collected powerups (was in prev but not in current)
+      const currPuIds = new Set<string>();
+      for (const lp of localState.powerups) currPuIds.add(lp.id);
+      for (const prevId of prevPuIds) {
+        if (!currPuIds.has(prevId)) {
+          playSound("pickup");
+          break;
+        }
+      }
+
+      // Fill snapshot buffer for remote player interpolation
+      const snap: Snapshot = {
+        timestamp: Date.now(),
+        players: new Map()
+      };
+      for (const sp of state.players) {
+        snap.players.set(sp.id, {
+          x: sp.x, y: sp.y,
+          vx: sp.vx, vy: sp.vy,
+          radius: sp.radius, mass: sp.mass,
+          alive: sp.alive
+        });
+      }
+      snapshotBuffer.push(snap);
+      while (snapshotBuffer.length > 60) snapshotBuffer.shift();
     });
-
-    // Helper to add hazard to local state
-    const addLocalHazard = (h: any) => {
-      const localH = new Hazard();
-      localH.id = h.id;
-      localH.type = h.type;
-      localH.x = h.x;
-      localH.y = h.y;
-      localH.radius = h.radius || 30;
-      localState?.hazards.push(localH);
-      
-      h.onChange(() => {
-        localH.x = h.x;
-        localH.y = h.y;
-        localH.radius = h.radius;
-      });
-    };
-
-    // Helper to add powerup to local state
-    const addLocalPowerup = (p: any) => {
-      const localP = new PowerUp();
-      localP.id = p.id;
-      localP.type = p.type;
-      localP.x = p.x;
-      localP.y = p.y;
-      localP.radius = p.radius || 18;
-      localState?.powerups.push(localP);
-    };
-
-    // Sync hazards and powerups for local prediction
-    if (room.state && room.state.hazards) {
-      room.state.hazards.onAdd((h: any) => addLocalHazard(h));
-      room.state.hazards.onRemove((h: any) => {
-        if (!localState) return;
-        const idx = localState.hazards.findIndex(lh => lh.id === h.id);
-        if (idx !== -1) localState.hazards.splice(idx, 1);
-      });
-    }
-
-    if (room.state && room.state.powerups) {
-      room.state.powerups.onAdd((p: any) => addLocalPowerup(p));
-      room.state.powerups.onRemove((p: any) => {
-        if (!localState) return;
-        const idx = localState.powerups.findIndex(lp_pu => lp_pu.id === p.id);
-        if (idx !== -1) localState.powerups.splice(idx, 1);
-      });
-    }
 
     room.onMessage("ack", (message: { seq: number }) => {
       lastAckedSeq = message.seq;
@@ -498,9 +514,11 @@ function renderGame() {
   }
 
   const now = Date.now();
-  const renderTime = now - 100;
 
+  // Compute interpolated positions for remote players from snapshot buffer
+  const interpolatedPositions = new Map<string, { x: number; y: number }>();
   if (snapshotBuffer.length >= 2) {
+    const renderTime = now - 100; // 100ms render delay for smooth interpolation
     let before: Snapshot | null = null;
     let after: Snapshot | null = null;
     for (let i = 0; i < snapshotBuffer.length - 1; i++) {
@@ -510,15 +528,23 @@ function renderGame() {
         break;
       }
     }
+    // Fallback: use last two snapshots if no pair found around renderTime
+    if (!before && snapshotBuffer.length >= 2) {
+      before = snapshotBuffer[snapshotBuffer.length - 2];
+      after = snapshotBuffer[snapshotBuffer.length - 1];
+    }
     if (before && after) {
-      const alpha = (renderTime - before.timestamp) / (after.timestamp - before.timestamp);
+      const range = after.timestamp - before.timestamp || 1;
+      const alpha = Math.max(0, Math.min(1, (renderTime - before.timestamp) / range));
       for (const player of localState.players) {
         if (player.id === room.sessionId) continue;
         const bP = before.players.get(player.id);
         const aP = after.players.get(player.id);
         if (bP && aP && bP.alive && aP.alive) {
-          player.x = bP.x + (aP.x - bP.x) * alpha;
-          player.y = bP.y + (aP.y - bP.y) * alpha;
+          interpolatedPositions.set(player.id, {
+            x: bP.x + (aP.x - bP.x) * alpha,
+            y: bP.y + (aP.y - bP.y) * alpha,
+          });
         }
       }
     }
@@ -667,40 +693,80 @@ function renderGame() {
         }
     }
 
-  // 6. Render Players
-  const renderList = serverPlayers.length > 0 ? serverPlayers : Array.from(localState.players as Iterable<any>);
+  // 6. Render Players from localState (with interpolation for remotes)
+  const localPlayers = localState.players as Iterable<any>;
+  const renderList = (serverPlayers.length > 0 && localState.players.length === 0)
+    ? serverPlayers
+    : Array.from(localPlayers);
+  const renderTime = now;
+
   for (const player of renderList) {
     if (!player?.id) continue;
-    if (!player.alive) { 
-        playerGraphicsMap.get(player.id)?.clear(); 
+    if (!player.alive) {
+        playerGraphicsMap.get(player.id)?.clear();
         const nt = playerNameTextMap.get(player.id);
         if (nt) nt.visible = false;
-        continue; 
+        continue;
     }
     let pg = playerGraphicsMap.get(player.id);
     if (!pg) { pg = new Graphics(); app.stage.addChild(pg); playerGraphicsMap.set(player.id, pg); }
     pg.clear();
 
     const isLocal = player.id === room.sessionId;
-    const px = (isLocal && lp?.alive) ? lp.x : (player.x ?? 0);
-    const py = (isLocal && lp?.alive) ? lp.y : (player.y ?? 0);
     const radius = player.radius || 30;
+
+    // Use interpolated position for remote players, predicted for local
+    let px: number, py: number;
+    if (isLocal && lp?.alive) {
+      px = lp.x;
+      py = lp.y;
+    } else if (!isLocal) {
+      const interp = interpolatedPositions.get(player.id);
+      if (interp) {
+        px = interp.x;
+        py = interp.y;
+      } else {
+        px = player.x ?? 0;
+        py = player.y ?? 0;
+      }
+    } else {
+      px = player.x ?? 0;
+      py = player.y ?? 0;
+    }
+
     const colorStr: string = player.color ?? "";
-    const pColor = colorStr.startsWith("#")
-      ? (parseInt(colorStr.slice(1), 16) || 0x3b82f6)
-      : 0x3b82f6;
+    const pColor = parseColor(colorStr);
 
     const pAlpha = player.ghostTimer > 0 ? 0.4 : 1.0;
-    pg.circle(ox + px, oy + py, radius).fill({ color: pColor, alpha: pAlpha }).stroke({ color: 0xffffff, width: isLocal ? 3 : 1, alpha: pAlpha });
-    
-    if (player.shieldActive) pg.circle(ox + px, oy + py, radius + 6).stroke({ color: 0x22d3ee, width: 3 });
+    // Main circle
+    pg.circle(ox + px, oy + py, radius)
+      .fill({ color: pColor, alpha: pAlpha })
+      .stroke({ color: 0xffffff, width: isLocal ? 3 : 1, alpha: pAlpha });
+
+    // Stun visual - flashing white overlay
+    if (player.stunTimer > 0) {
+      const stunPulse = 0.3 + Math.sin(renderTime * 0.025) * 0.3;
+      pg.circle(ox + px, oy + py, radius + 3)
+        .stroke({ color: 0xffffff, width: 3, alpha: stunPulse });
+    }
+
+    if (player.shieldActive)
+      pg.circle(ox + px, oy + py, radius + 6).stroke({ color: 0x22d3ee, width: 3 });
     if (player.hammerCharge) {
-      // Draw a "heavy" outline for hammer charge
-      pg.circle(ox + px, oy + py, radius + 4).stroke({ color: 0xf87171, width: 4, alpha: 0.6 + Math.sin(Date.now() * 0.02) * 0.4 });
+      pg.circle(ox + px, oy + py, radius + 4)
+        .stroke({ color: 0xf87171, width: 4, alpha: 0.6 + Math.sin(renderTime * 0.02) * 0.4 });
     }
     if (player.ghostTimer > 0) {
-      // Trail effect for ghost
       if (Math.random() > 0.8) spawnParticles(px, py, 1, 0xa5b4fc, 0.2);
+    }
+
+    // Dash cooldown ring for local player
+    if (isLocal && player.dashCooldown > 0) {
+      const cdFrac = player.dashCooldown / PHYSICS.DASH_COOLDOWN;
+      const startAngle = -Math.PI / 2;
+      const endAngle = startAngle + (1 - cdFrac) * Math.PI * 2;
+      pg.arc(ox + px, oy + py, radius + 8, startAngle, endAngle)
+        .stroke({ color: 0xfacc15, width: 2, alpha: 0.8 });
     }
 
     // Render Name Tag
@@ -739,24 +805,28 @@ function renderGame() {
     }
   }
 
-  // 7. Update Scoreboard
+  // 7. Update Scoreboard (only when kills change)
   const sortedPlayers = [...renderList].sort((a, b) => (b.kills || 0) - (a.kills || 0));
-  let sb = "SCOREBOARD\n";
-  sortedPlayers.forEach((p, i) => {
-    sb += `${i+1}. ${p.name || "???"}: ${p.kills || 0} Kills\n`;
-  });
-  scoreboardText.text = sb;
-  scoreboardText.x = (window.innerWidth / viewScale) - scoreboardText.width - 20;
-  scoreboardText.y = 20;
+  const killHash = sortedPlayers.map(p => `${p.id}:${p.kills || 0}`).join(",");
+  if (killHash !== lastKillHash) {
+    lastKillHash = killHash;
+    let sb = "SCOREBOARD\n";
+    sortedPlayers.forEach((p, i) => {
+      sb += `${i+1}. ${p.name || "???"}: ${p.kills || 0} Kills\n`;
+    });
+    scoreboardText.text = sb;
+    scoreboardText.x = (window.innerWidth / viewScale) - scoreboardText.width - 20;
+    scoreboardText.y = 20;
+  }
 
   const aliveCount = renderList.filter((p: any) => p?.alive).length;
   const objectCount = (room?.state?.hazards?.length || 0) + (room?.state?.powerups?.length || 0);
   const ping = room?.connection?.transport?.ping || 0;
-  
+
   const isWaiting = localState?.matchPhase === "waiting";
   const timerLabel = isWaiting ? "STARTS IN" : "TIME";
   const timerVal = Math.ceil(localState?.matchTimer || 0);
-  
+
   hudText.text = `SUMO CLASH\nMap: ${(localState?.mapId || "Classic").toUpperCase()}\nPlayers Alive: ${aliveCount}\n${timerLabel}: ${timerVal}s\nObjects: ${objectCount}\nPing: ${ping}ms`;
   
   const ct = (app as any).countdownText;
@@ -764,9 +834,9 @@ function renderGame() {
     if (isWaiting && timerVal > 0) {
       ct.visible = true;
       ct.text = timerVal.toString();
+      ct.style.fill = 0xfacc15; // Yellow countdown
       ct.x = window.innerWidth / 2;
       ct.y = window.innerHeight / 2;
-      // Pulse effect
       const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
       ct.scale.set(pulse);
     } else if (localState?.matchPhase === "playing" && localState.matchTimer > 88) {
