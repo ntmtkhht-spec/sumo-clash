@@ -348,6 +348,7 @@ async function startLobby(username: string, mapId: string) {
         lPlayer.shieldActive = sPlayer.shieldActive;
         lPlayer.hammerCharge = sPlayer.hammerCharge;
         lPlayer.ghostTimer = sPlayer.ghostTimer;
+        lPlayer.dashTimer = sPlayer.dashTimer;
 
         if (sPlayer.id === room.sessionId) {
           // Save old predicted position for smoothing
@@ -456,6 +457,7 @@ async function startLobby(username: string, mapId: string) {
     });
 
     room.onMessage("ended", (data: { winner: string }) => {
+      document.getElementById("lost-overlay")?.remove();
       const overlay = document.createElement("div");
       overlay.className = "overlay-container";
       overlay.innerHTML = `
@@ -488,9 +490,13 @@ async function startLobby(username: string, mapId: string) {
 
 
       const lp = localState.players.find(p => p.id === room.sessionId);
-      if (inputCopy.dash && lp && lp.dashCooldown === 0) {
+      // Sound on dash START
+      if (inputCopy.dash && lp && lp.dashCooldown === 0 && lp.dashTimer === 0) {
         playSound("dash");
-        spawnParticles(lp.x, lp.y, 20, parseInt(lp.color.replace("#", ""), 16), 1.2);
+      }
+      // Trail particles while dashing
+      if (lp && lp.dashTimer > 0) {
+        spawnParticles(lp.x, lp.y, 3, parseInt(lp.color.replace("#", ""), 16), 0.8);
       }
 
       pendingInputs.push({ seq, input: inputCopy });
@@ -595,6 +601,42 @@ function renderGame() {
       const fallColor = typeof camPlayer.color === "string" && camPlayer.color.startsWith("#")
         ? (parseInt(camPlayer.color.slice(1), 16) || 0xff4444) : 0xff4444;
       spawnParticles(camPlayer.x, camPlayer.y, 40, fallColor, 2.0);
+
+      // Show Game Lost overlay
+      if (!document.getElementById("lost-overlay")) {
+        const lostEl = document.createElement("div");
+        lostEl.id = "lost-overlay";
+        lostEl.style.cssText = `
+          position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          background: rgba(0,0,0,0.6); z-index: 200; pointer-events: auto;
+        `;
+        lostEl.innerHTML = `
+          <h2 style="font-family: 'Outfit','Inter',sans-serif; font-size: 72px; font-weight: 900;
+            color: #ef4444; text-shadow: 0 4px 10px rgba(0,0,0,0.5); margin: 0;">YOU LOST</h2>
+          <p style="font-family: 'Outfit','Inter',sans-serif; font-size: 20px; color: #94a3b8;
+            margin: 16px 0 32px;">Knocked out of the arena!</p>
+          <div style="display: flex; gap: 16px;">
+            <button id="spectate-btn" style="padding: 12px 32px; font-size: 18px; font-weight: 700;
+              font-family: 'Outfit','Inter',sans-serif; background: #1e293b; color: #e2e8f0;
+              border: 2px solid #475569; border-radius: 8px; cursor: pointer;">SPECTATE</button>
+            <button id="rejoin-btn" style="padding: 12px 32px; font-size: 18px; font-weight: 700;
+              font-family: 'Outfit','Inter',sans-serif; background: #3b82f6; color: white;
+              border: none; border-radius: 8px; cursor: pointer;">REJOIN</button>
+          </div>
+        `;
+        document.body.appendChild(lostEl);
+        document.getElementById("spectate-btn")?.addEventListener("click", () => {
+          lostEl.remove();
+        });
+        document.getElementById("rejoin-btn")?.addEventListener("click", () => {
+          lostEl.remove();
+          room.leave();
+          const nameInput = document.querySelector("#username-input") as HTMLInputElement;
+          const mapSel = document.querySelector("#map-select") as HTMLSelectElement;
+          startLobby(nameInput?.value || camPlayer.name || "Guest", mapSel?.value || localState?.mapId || "classic");
+        });
+      }
     }
     lastLocalAlive = camPlayer.alive;
     if (camPlayer.alive) {
@@ -788,8 +830,13 @@ function renderGame() {
       if (Math.random() > 0.8) spawnParticles(px, py, 1, 0xa5b4fc, 0.2);
     }
 
-    // Dash cooldown ring for local player
-    if (isLocal && player.dashCooldown > 0) {
+    // Dash: glow ring while boosting, cooldown ring otherwise
+    if (isLocal && player.dashTimer > 0) {
+      // Active dash: pulsing orange ring
+      const dashAlpha = 0.6 + Math.sin(renderTime * 0.03) * 0.4;
+      pg.circle(ox + px, oy + py, radius + 10)
+        .stroke({ color: 0xf97316, width: 4, alpha: dashAlpha });
+    } else if (isLocal && player.dashCooldown > 0) {
       const cdFrac = player.dashCooldown / PHYSICS.DASH_COOLDOWN;
       const startAngle = -Math.PI / 2;
       const endAngle = startAngle + (1 - cdFrac) * Math.PI * 2;

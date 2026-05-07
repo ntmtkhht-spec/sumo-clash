@@ -13,10 +13,10 @@ export const PHYSICS = {
   FRICTION: 4.0,
   COLLISION_RESTITUTION: 0.85,
   PUSH_FORCE_MULTIPLIER: 1.5,
-  DASH_IMPULSE: 600,
-  DASH_DURATION: 0.15,
-  DASH_COOLDOWN: 3.0,
-  ARENA_RADIUS_DEFAULT: 500,
+  DASH_THRUST: 1200,
+  DASH_DURATION: 1.4,
+  DASH_COOLDOWN: 5.0,
+  ARENA_RADIUS_DEFAULT: 950,
   ARENA_SHRINK_RATE: 0.5,
   ARENA_SHRINK_GRACE: 15,
   MASS_GROWTH_PER_SECOND: 0.04,
@@ -39,6 +39,7 @@ export class Player extends Schema {
   @type("string") color: string = "#3498db";
   @type("boolean") alive: boolean = true;
   @type("float32") dashCooldown: number = 0;
+  @type("float32") dashTimer: number = 0;
   @type("float32") stunTimer: number = 0;
   @type("boolean") shieldActive: boolean = false;
   @type("float32") speedBoostTimer: number = 0;
@@ -118,14 +119,17 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
       player.ghostTimer = Math.max(0, player.ghostTimer - dt);
     }
 
+    // Decrement dash timers (outside stun check so they tick down while stunned)
+    if (player.dashCooldown > 0) {
+      player.dashCooldown = Math.max(0, player.dashCooldown - dt);
+    }
+    if (player.dashTimer > 0) {
+      player.dashTimer = Math.max(0, player.dashTimer - dt);
+    }
+
     const input = inputs.get(player.id);
     // Only process inputs if not stunned
     if (input && player.stunTimer === 0) {
-      // Dash cooldown processing
-      if (player.dashCooldown > 0) {
-        player.dashCooldown = Math.max(0, player.dashCooldown - dt);
-      }
-
       // Movement accel
       let ax = 0;
       let ay = 0;
@@ -140,7 +144,7 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
       if (dist > 0) {
         let accel = PHYSICS.PLAYER_ACCEL;
         if (player.speedBoostTimer > 0) {
-          accel *= 1.4; // Speed Boost accel multiplier
+          accel *= 1.4;
         }
         ax = (ax / dist) * accel;
         ay = (ay / dist) * accel;
@@ -149,16 +153,19 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
       player.vx += ax * dt;
       player.vy += ay * dt;
 
-      // Apply dash impulse
-      if (input.dash && player.dashCooldown === 0) {
-        if (dist > 0) {
-          player.vx += (ax / dist) * PHYSICS.DASH_IMPULSE;
-          player.vy += (ay / dist) * PHYSICS.DASH_IMPULSE;
-        } else {
-          // Dash in the direction the player was facing or just default to forward
-          player.vy -= PHYSICS.DASH_IMPULSE;
-        }
+      // Dash: start rocket boost
+      if (input.dash && player.dashCooldown === 0 && player.dashTimer === 0) {
+        player.dashTimer = PHYSICS.DASH_DURATION;
         player.dashCooldown = PHYSICS.DASH_COOLDOWN;
+      }
+
+      // Dash: apply sustained thrust while active
+      if (player.dashTimer > 0 && dist > 0) {
+        player.vx += (ax / dist) * PHYSICS.DASH_THRUST * dt;
+        player.vy += (ay / dist) * PHYSICS.DASH_THRUST * dt;
+      } else if (player.dashTimer > 0) {
+        // No direction input during dash → thrust forward (up)
+        player.vy -= PHYSICS.DASH_THRUST * dt;
       }
     }
 
@@ -169,8 +176,10 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
     // Limit max speed
     const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
     let maxSpeed = PHYSICS.PLAYER_MAX_SPEED;
-    if (player.speedBoostTimer > 0) {
-      maxSpeed *= 1.5; // Speed Boost max speed multiplier
+    if (player.dashTimer > 0) {
+      maxSpeed *= 2.2; // Rocket dash allows much higher speed
+    } else if (player.speedBoostTimer > 0) {
+      maxSpeed *= 1.5;
     }
     if (speed > maxSpeed) {
       player.vx = (player.vx / speed) * maxSpeed;
@@ -316,8 +325,8 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
           if (p2.hammerCharge) { bonus += 1.5; p2.hammerCharge = false; }
 
           // Dash impact: player who is actively dashing hits harder
-          const p1Dashing = p1.dashCooldown > PHYSICS.DASH_COOLDOWN - PHYSICS.DASH_DURATION;
-          const p2Dashing = p2.dashCooldown > PHYSICS.DASH_COOLDOWN - PHYSICS.DASH_DURATION;
+          const p1Dashing = p1.dashTimer > 0;
+          const p2Dashing = p2.dashTimer > 0;
           const dashBonus1 = p1Dashing ? 2.0 : 1.0;
           const dashBonus2 = p2Dashing ? 2.0 : 1.0;
 

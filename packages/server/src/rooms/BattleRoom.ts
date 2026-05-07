@@ -217,7 +217,7 @@ export class BattleRoom extends Room<any> {
     stepPhysics(this.state, this.inputs, dt);
 
     // Validate player speeds (anti-cheat)
-    const maxValidSpeed = PHYSICS.PLAYER_MAX_SPEED * 1.5 + PHYSICS.DASH_IMPULSE + 200;
+    const maxValidSpeed = PHYSICS.PLAYER_MAX_SPEED * 2.5 + 200;
     for (const player of this.state.players) {
       if (!player.alive) continue;
       const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
