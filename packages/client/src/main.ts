@@ -290,28 +290,18 @@ async function startLobby(username: string, mapId: string) {
     });
     app.stage.addChild(scoreboardText);
 
-    // Large center countdown
-    const countdownText = new Text({
-      text: "",
-      style: {
-        fontFamily: "'Outfit', 'Inter', sans-serif",
-        fontSize: 120,
-        fontWeight: "900",
-        fill: 0xfacc15,
-        dropShadow: {
-            alpha: 0.5,
-            blur: 10,
-            distance: 4,
-            color: 0x000000
-        }
-      }
-    });
-    countdownText.anchor.set(0.5);
-    countdownText.x = window.innerWidth / 2;
-    countdownText.y = window.innerHeight / 2;
-    countdownText.visible = false;
-    app.stage.addChild(countdownText);
-    (app as any).countdownText = countdownText; // Attach to app for access in renderGame
+    // HTML countdown overlay — not affected by canvas scaling
+    const countdownEl = document.createElement("div");
+    countdownEl.id = "countdown-overlay";
+    countdownEl.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-family: 'Outfit', 'Inter', sans-serif; font-size: 120px; font-weight: 900;
+      color: #facc15; text-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      pointer-events: none; z-index: 100; display: none;
+      transition: transform 0.15s ease-out;
+    `;
+    document.body.appendChild(countdownEl);
+    (app as any).countdownEl = countdownEl;
 
 
     // Initial state copy
@@ -836,25 +826,21 @@ function renderGame() {
 
   hudText.text = `SUMO CLASH\nMap: ${(localState?.mapId || "Classic").toUpperCase()}\nPlayers Alive: ${aliveCount}\n${timerLabel}: ${timerVal}s\nObjects: ${objectCount}\nPing: ${ping}ms`;
   
-  const ct = (app as any).countdownText;
-  if (ct) {
+  const cdEl = (app as any).countdownEl as HTMLDivElement | undefined;
+  if (cdEl) {
     if (isWaiting && timerVal > 0) {
-      ct.visible = true;
-      ct.text = timerVal.toString();
-      ct.style.fill = 0xfacc15; // Yellow countdown
-      ct.x = window.innerWidth / 2 / viewScale;
-      ct.y = window.innerHeight / 2 / viewScale;
       const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
-      ct.scale.set(pulse);
+      cdEl.style.display = "block";
+      cdEl.textContent = timerVal.toString();
+      cdEl.style.color = "#facc15";
+      cdEl.style.transform = `translate(-50%, -50%) scale(${pulse})`;
     } else if (currentPhase === "playing" && localState.matchTimer > 88) {
-        ct.visible = true;
-        ct.text = "GO!";
-        ct.style.fill = 0x4ade80;
-        ct.x = window.innerWidth / 2 / viewScale;
-        ct.y = window.innerHeight / 2 / viewScale;
-        ct.scale.set(1.2);
+      cdEl.style.display = "block";
+      cdEl.textContent = "GO!";
+      cdEl.style.color = "#4ade80";
+      cdEl.style.transform = "translate(-50%, -50%) scale(1.2)";
     } else {
-      ct.visible = false;
+      cdEl.style.display = "none";
     }
   }
 
