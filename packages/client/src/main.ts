@@ -398,19 +398,23 @@ async function startLobby(username: string, mapId: string) {
     };
 
     // Sync hazards and powerups for local prediction
-    room.state.hazards.onAdd((h: any) => addLocalHazard(h));
-    room.state.hazards.onRemove((h: any) => {
-      if (!localState) return;
-      const idx = localState.hazards.findIndex(lh => lh.id === h.id);
-      if (idx !== -1) localState.hazards.splice(idx, 1);
-    });
+    if (room.state && room.state.hazards) {
+      room.state.hazards.onAdd((h: any) => addLocalHazard(h));
+      room.state.hazards.onRemove((h: any) => {
+        if (!localState) return;
+        const idx = localState.hazards.findIndex(lh => lh.id === h.id);
+        if (idx !== -1) localState.hazards.splice(idx, 1);
+      });
+    }
 
-    room.state.powerups.onAdd((p: any) => addLocalPowerup(p));
-    room.state.powerups.onRemove((p: any) => {
-      if (!localState) return;
-      const idx = localState.powerups.findIndex(lp_pu => lp_pu.id === p.id);
-      if (idx !== -1) localState.powerups.splice(idx, 1);
-    });
+    if (room.state && room.state.powerups) {
+      room.state.powerups.onAdd((p: any) => addLocalPowerup(p));
+      room.state.powerups.onRemove((p: any) => {
+        if (!localState) return;
+        const idx = localState.powerups.findIndex(lp_pu => lp_pu.id === p.id);
+        if (idx !== -1) localState.powerups.splice(idx, 1);
+      });
+    }
 
     room.onMessage("ack", (message: { seq: number }) => {
       lastAckedSeq = message.seq;
