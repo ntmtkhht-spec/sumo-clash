@@ -98,6 +98,7 @@ const currentInput: PlayerInput = {
 // PixiJS display objects
 let arenaGraphics: Graphics;
 const playerGraphicsMap = new Map<string, Graphics>();
+const playerNameTextMap = new Map<string, Text>();
 let hudText: Text;
 let scoreboardText: Text;
 
@@ -666,7 +667,12 @@ function renderGame() {
   const renderList = serverPlayers.length > 0 ? serverPlayers : Array.from(localState.players as Iterable<any>);
   for (const player of renderList) {
     if (!player?.id) continue;
-    if (!player.alive) { playerGraphicsMap.get(player.id)?.clear(); continue; }
+    if (!player.alive) { 
+        playerGraphicsMap.get(player.id)?.clear(); 
+        const nt = playerNameTextMap.get(player.id);
+        if (nt) nt.visible = false;
+        continue; 
+    }
     let pg = playerGraphicsMap.get(player.id);
     if (!pg) { pg = new Graphics(); app.stage.addChild(pg); playerGraphicsMap.set(player.id, pg); }
     pg.clear();
@@ -691,6 +697,41 @@ function renderGame() {
     if (player.ghostTimer > 0) {
       // Trail effect for ghost
       if (Math.random() > 0.8) spawnParticles(px, py, 1, 0xa5b4fc, 0.2);
+    }
+
+    // Render Name Tag
+    let nameText = playerNameTextMap.get(player.id);
+    if (!nameText) {
+      nameText = new Text({
+        text: player.name || "Guest",
+        style: {
+          fontFamily: "'Outfit', 'Inter', sans-serif",
+          fontSize: 16,
+          fontWeight: "800",
+          fill: 0xffffff,
+          align: "center",
+          stroke: { color: 0x000000, width: 3 }
+        }
+      });
+      nameText.anchor.set(0.5);
+      app.stage.addChild(nameText);
+      playerNameTextMap.set(player.id, nameText);
+    }
+    nameText.text = player.name || "Guest";
+    nameText.x = ox + px;
+    nameText.y = oy + py + radius + 20;
+    nameText.visible = true;
+    nameText.alpha = pAlpha;
+  }
+
+  // Cleanup old player graphics and names
+  for (const [id, pg] of playerGraphicsMap.entries()) {
+    const stillInList = renderList.some((p: any) => p.id === id);
+    if (!stillInList) {
+        pg.destroy();
+        playerGraphicsMap.delete(id);
+        const nt = playerNameTextMap.get(id);
+        if (nt) { nt.destroy(); playerNameTextMap.delete(id); }
     }
   }
 
