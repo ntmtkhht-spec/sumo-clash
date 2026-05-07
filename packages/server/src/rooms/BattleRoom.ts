@@ -32,7 +32,6 @@ export class BattleRoom extends Room<any> {
   lastSeq = new Map<string, number>();
 
   powerupTimer = 10;
-  bumperTimer = 15;
   countdownStarted: boolean = false;
   accumulatedTime: number = 0;
 
@@ -153,24 +152,6 @@ export class BattleRoom extends Room<any> {
         console.log("PowerUp spawned:", pu.type, "at", pu.x, pu.y);
       }
 
-      this.bumperTimer -= dt;
-      if (this.bumperTimer <= 0) {
-        this.bumperTimer = 8; // New bumper every 8 seconds
-        // Cap bumpers to prevent unbounded growth
-        const bumperCount = this.state.hazards.filter((h: any) => h.type === "bumper").length;
-        if (bumperCount < PHYSICS.BUMPER_MAX) {
-          const bumper = new Hazard();
-          bumper.id = `bumper_${Date.now()}`;
-          bumper.type = "bumper";
-          const angle = Math.random() * Math.PI * 2;
-          const dist = Math.random() * (this.state.arenaRadius - 100);
-          bumper.x = Math.cos(angle) * dist;
-          bumper.y = Math.sin(angle) * dist;
-          bumper.radius = 25 + Math.random() * 15;
-          this.state.hazards.push(bumper);
-          console.log("Bumper spawned at", bumper.x, bumper.y);
-        }
-      }
 
       const alivePlayers = this.state.players.filter((p: Player) => p.alive);
       const totalPlayers = this.state.players.length;

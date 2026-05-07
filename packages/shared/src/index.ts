@@ -225,16 +225,9 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
         player.x += nx * overlap;
         player.y += ny * overlap;
 
-        if (hazard.type === "bumper") {
-          // Trampoline effect: Very strong impulse and slightly longer stun
-          player.vx = nx * 800;
-          player.vy = ny * 800;
-          player.stunTimer = 0.6;
-        } else {
-          player.vx += nx * 400;
-          player.vy += ny * 400;
-          player.stunTimer = 0.5; // Stun the player briefly on impact
-        }
+        player.vx += nx * 400;
+        player.vy += ny * 400;
+        player.stunTimer = 0.5;
       }
     }
   }
@@ -322,13 +315,20 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
           if (p1.hammerCharge) { bonus += 1.5; p1.hammerCharge = false; }
           if (p2.hammerCharge) { bonus += 1.5; p2.hammerCharge = false; }
 
+          // Dash impact: player who is actively dashing hits harder
+          const p1Dashing = p1.dashCooldown > PHYSICS.DASH_COOLDOWN - PHYSICS.DASH_DURATION;
+          const p2Dashing = p2.dashCooldown > PHYSICS.DASH_COOLDOWN - PHYSICS.DASH_DURATION;
+          const dashBonus1 = p1Dashing ? 2.0 : 1.0;
+          const dashBonus2 = p2Dashing ? 2.0 : 1.0;
+
           // Standard 2D elastic collision formula
           const impulse = (2 * p) / (m1 + m2) * PHYSICS.COLLISION_RESTITUTION * PHYSICS.PUSH_FORCE_MULTIPLIER * bonus;
 
-          p1.vx -= nx * impulse * m2;
-          p1.vy -= ny * impulse * m2;
-          p2.vx += nx * impulse * m1;
-          p2.vy += ny * impulse * m1;
+          // Dashing player knocks opponent harder, receives less knockback
+          p1.vx -= nx * impulse * m2 * (1.0 / dashBonus1) * dashBonus2;
+          p1.vy -= ny * impulse * m2 * (1.0 / dashBonus1) * dashBonus2;
+          p2.vx += nx * impulse * m1 * dashBonus1 * (1.0 / dashBonus2);
+          p2.vy += ny * impulse * m1 * dashBonus1 * (1.0 / dashBonus2);
 
           // Track last hit for kill attribution
           p1.lastHitBy = p2.id;
