@@ -320,6 +320,7 @@ async function startLobby(username: string, mapId: string) {
     room.onStateChange((state: any) => {
       if (!localState || !state) return;
 
+      localState.matchPhase = state.matchPhase;
       localState.matchTimer = state.matchTimer;
       localState.mapId = state.mapId;
       localState.arenaRadius = state.arenaRadius;
@@ -461,8 +462,13 @@ async function startLobby(username: string, mapId: string) {
 
     setInterval(() => {
       if (!room || !localState) return;
-      
-      const isWaiting = localState.matchPhase === "waiting";
+
+      // Always read matchPhase from authoritative Colyseus state
+      const roomPhase = room?.state?.matchPhase ?? localState.matchPhase;
+      if (localState.matchPhase !== roomPhase) {
+        localState.matchPhase = roomPhase;
+      }
+      const isWaiting = roomPhase === "waiting";
       const seq = nextSeq++;
       
       // If waiting, force all inputs to false
@@ -823,7 +829,8 @@ function renderGame() {
   const objectCount = (room?.state?.hazards?.length || 0) + (room?.state?.powerups?.length || 0);
   const ping = room?.connection?.transport?.ping || 0;
 
-  const isWaiting = localState?.matchPhase === "waiting";
+  const currentPhase = room?.state?.matchPhase ?? localState?.matchPhase;
+  const isWaiting = currentPhase === "waiting";
   const timerLabel = isWaiting ? "STARTS IN" : "TIME";
   const timerVal = Math.ceil(localState?.matchTimer || 0);
 
@@ -839,7 +846,7 @@ function renderGame() {
       ct.y = window.innerHeight / 2;
       const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
       ct.scale.set(pulse);
-    } else if (localState?.matchPhase === "playing" && localState.matchTimer > 88) {
+    } else if (currentPhase === "playing" && localState.matchTimer > 88) {
         // Show "GO!" for 2 seconds
         ct.visible = true;
         ct.text = "GO!";
@@ -853,7 +860,7 @@ function renderGame() {
   }
 
   if (isWaiting) {
-    hudText.style.fill = 0xfacc15; // Yellow for countdown
+    hudText.style.fill = 0xfacc15;
   } else {
     hudText.style.fill = 0xffffff;
   }

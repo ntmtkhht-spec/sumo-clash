@@ -33,7 +33,7 @@ export class BattleRoom extends Room<any> {
 
   powerupTimer = 10;
   bumperTimer = 15; // Bumpers start appearing after 15s
-  startTimer: any = null;
+  countdownStarted: boolean = false;
 
   onCreate(options: any) {
     this.setState(new GameState());
@@ -78,28 +78,9 @@ export class BattleRoom extends Room<any> {
 
     this.state.players.push(player);
 
-    if (this.state.matchPhase === "waiting") {
-      if (!this.startTimer) {
-        // Initialize matchTimer with countdown duration for 'waiting' phase
-        this.state.matchTimer = 3; 
-        
-        const countdownInterval = setInterval(() => {
-          if (this.state.matchPhase === "waiting") {
-            this.state.matchTimer -= 1;
-            if (this.state.matchTimer <= 0) {
-              this.state.matchPhase = "playing";
-              this.state.matchTimer = 90; // Reset to match duration
-              this.setupHazardsForMap();
-              clearInterval(countdownInterval);
-              this.startTimer = null;
-            }
-          } else {
-            clearInterval(countdownInterval);
-            this.startTimer = null;
-          }
-        }, 1000);
-        this.startTimer = countdownInterval;
-      }
+    if (this.state.matchPhase === "waiting" && !this.countdownStarted) {
+      this.state.matchTimer = 3;
+      this.countdownStarted = true;
     }
   }
 
@@ -112,7 +93,6 @@ export class BattleRoom extends Room<any> {
   }
 
   onDispose() {
-    if (this.startTimer) clearTimeout(this.startTimer);
     console.log("Room", this.roomId, "disposing...");
   }
 
@@ -140,6 +120,17 @@ export class BattleRoom extends Room<any> {
   }
 
   update(dt: number) {
+    // 0. Countdown phase — runs inside simulation loop so Colyseus broadcasts it
+    if (this.state.matchPhase === "waiting" && this.countdownStarted) {
+      this.state.matchTimer = Math.max(0, this.state.matchTimer - dt);
+      if (this.state.matchTimer <= 0) {
+        this.state.matchPhase = "playing";
+        this.state.matchTimer = 90;
+        this.countdownStarted = false;
+        this.setupHazardsForMap();
+      }
+    }
+
     // 1. Match State Management
     if (this.state.matchPhase === "playing") {
       this.powerupTimer -= dt;
