@@ -6,7 +6,8 @@
     "rootDir": "src",
     "outDir": "dist",
     "experimentalDecorators": true,
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    "types": ["vite/client"]
   },
   "include": ["src/**/*"]
 }

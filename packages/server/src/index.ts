@@ -22,9 +22,12 @@ const gameServer = new Server({
 
 gameServer.define("battle", BattleRoom);
 
+// Health check for Render.com cold starts
+app.get("/ping", (req, res) => res.send("pong"));
+
 // Monitor for local dev
 app.use("/colyseus", monitor());
 
 gameServer.listen(port).then(() => {
-  console.log(`[GameServer] Listening on ws://localhost:${port}`);
+  console.log(`[GameServer] Listening on ws://127.0.0.1:${port}`);
 });

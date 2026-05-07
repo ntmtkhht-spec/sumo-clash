@@ -4,8 +4,8 @@ if (typeof (Symbol as any).metadata === "undefined") {
 import { Schema, ArraySchema, type } from "@colyseus/schema";
 
 export const PHYSICS = {
-  TICK_RATE_HZ: 30,
-  TICK_DT: 1 / 30,
+  TICK_RATE_HZ: 60,
+  TICK_DT: 1 / 60,
   PLAYER_RADIUS_DEFAULT: 30,
   PLAYER_MASS_DEFAULT: 1.0,
   PLAYER_ACCEL: 1800,
@@ -28,50 +28,50 @@ export const PHYSICS = {
 export class Player extends Schema {
   @type("string") id: string = "";
   @type("string") name: string = "";
-  @type("number") x: number = 0;
-  @type("number") y: number = 0;
-  @type("number") vx: number = 0;
-  @type("number") vy: number = 0;
-  @type("number") radius: number = PHYSICS.PLAYER_RADIUS_DEFAULT;
-  @type("number") mass: number = PHYSICS.PLAYER_MASS_DEFAULT;
+  @type("float32") x: number = 0;
+  @type("float32") y: number = 0;
+  @type("float32") vx: number = 0;
+  @type("float32") vy: number = 0;
+  @type("float32") radius: number = PHYSICS.PLAYER_RADIUS_DEFAULT;
+  @type("float32") mass: number = PHYSICS.PLAYER_MASS_DEFAULT;
   @type("string") color: string = "#3498db";
   @type("boolean") alive: boolean = true;
-  @type("number") dashCooldown: number = 0;
-  @type("number") stunTimer: number = 0;
+  @type("float32") dashCooldown: number = 0;
+  @type("float32") stunTimer: number = 0;
   @type("boolean") shieldActive: boolean = false;
-  @type("number") speedBoostTimer: number = 0;
-  @type("number") kills: number = 0;
-  @type("number") score: number = 0;
+  @type("float32") speedBoostTimer: number = 0;
+  @type("uint16") kills: number = 0;
+  @type("uint32") score: number = 0;
   @type("string") lastHitBy: string = "";
-  @type("number") ghostTimer: number = 0;
+  @type("float32") ghostTimer: number = 0;
   @type("boolean") hammerCharge: boolean = false;
 }
 
 export class Hazard extends Schema {
   @type("string") id: string = "";
   @type("string") type: string = "lava";
-  @type("number") x: number = 0;
-  @type("number") y: number = 0;
-  @type("number") radius: number = 80;
-  @type("number") vx: number = 0;
-  @type("number") vy: number = 0;
+  @type("float32") x: number = 0;
+  @type("float32") y: number = 0;
+  @type("float32") radius: number = 80;
+  @type("float32") vx: number = 0;
+  @type("float32") vy: number = 0;
 }
 
 export class PowerUp extends Schema {
   @type("string") id: string = "";
   @type("string") type: string = "speed";
-  @type("number") x: number = 0;
-  @type("number") y: number = 0;
-  @type("number") radius: number = 18;
+  @type("float32") x: number = 0;
+  @type("float32") y: number = 0;
+  @type("float32") radius: number = 18;
 }
 
 export class GameState extends Schema {
   @type([Player]) players = new ArraySchema<Player>();
   @type([Hazard]) hazards = new ArraySchema<Hazard>();
   @type([PowerUp]) powerups = new ArraySchema<PowerUp>();
-  @type("number") arenaRadius: number = PHYSICS.ARENA_RADIUS_DEFAULT;
+  @type("float32") arenaRadius: number = PHYSICS.ARENA_RADIUS_DEFAULT;
   @type("string") matchPhase: string = "waiting";
-  @type("number") matchTimer: number = 90;
+  @type("float32") matchTimer: number = 90;
   @type("string") mapId: string = "classic";
 }
 
@@ -90,9 +90,9 @@ export interface PlayerInput {
 /**
  * Deterministic physics step function for shared use by server and client.
  */
-export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, dt: number) {
+export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, dt: number, updateGlobalState: boolean = true) {
   // 1. Process arena shrinking
-  if (state.matchPhase === "playing") {
+  if (updateGlobalState && state.matchPhase === "playing") {
     state.matchTimer = Math.max(0, state.matchTimer - dt);
 
     const elapsed = 90 - state.matchTimer;
@@ -191,14 +191,16 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
   // 3. Move hazards and check hazard collision
   for (const hazard of state.hazards) {
     // Simple orbital motion for hazards
-    if (hazard.type === "lava") {
-      const time = state.matchTimer;
-      hazard.x = Math.sin(time * 0.5) * 150;
-      hazard.y = Math.cos(time * 0.5) * 150;
-    } else if (hazard.type === "blackhole") {
-      const time = state.matchTimer * 0.7;
-      hazard.x = Math.sin(time) * 180;
-      hazard.y = Math.cos(time) * 180;
+    if (updateGlobalState) {
+      if (hazard.type === "lava") {
+        const time = state.matchTimer;
+        hazard.x = Math.sin(time * 0.5) * 150;
+        hazard.y = Math.cos(time * 0.5) * 150;
+      } else if (hazard.type === "blackhole") {
+        const time = state.matchTimer * 0.7;
+        hazard.x = Math.sin(time) * 180;
+        hazard.y = Math.cos(time) * 180;
+      }
     }
 
     for (const player of state.players) {
@@ -206,13 +208,18 @@ export function stepPhysics(state: GameState, inputs: Map<string, PlayerInput>, 
 
       const dx = player.x - hazard.x;
       const dy = player.y - hazard.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
       const minDist = player.radius + hazard.radius;
 
       if (dist < minDist) {
         // Push the player away from hazard
-        const nx = dx / (dist || 1);
-        const ny = dy / (dist || 1);
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        // Separate to prevent jitter/sinking
+        const overlap = minDist - dist;
+        player.x += nx * overlap;
+        player.y += ny * overlap;
 
         if (hazard.type === "bumper") {
           // Trampoline effect: Very strong impulse and slightly longer stun

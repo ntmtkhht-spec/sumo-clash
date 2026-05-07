@@ -25,7 +25,7 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-export class BattleRoom extends Room<GameState> {
+export class BattleRoom extends Room<any> {
   maxClients = 8;
   inputs = new Map<string, PlayerInput>();
   inputBuffer = new Map<string, InputMessage[]>();
@@ -42,7 +42,7 @@ export class BattleRoom extends Room<GameState> {
       this.state.mapId = options.mapId;
     }
 
-    this.onMessage("input", (client, message: InputMessage) => {
+    this.onMessage("input", (client: Client, message: InputMessage) => {
       let clientInputs = this.inputBuffer.get(client.sessionId);
       if (!clientInputs) {
         clientInputs = [];
@@ -51,7 +51,7 @@ export class BattleRoom extends Room<GameState> {
       clientInputs.push(message);
     });
 
-    this.setSimulationInterval((dt) => {
+    this.setSimulationInterval((dt: number) => {
       this.update(dt / 1000);
     }, 1000 / PHYSICS.TICK_RATE_HZ);
     
@@ -80,18 +80,31 @@ export class BattleRoom extends Room<GameState> {
 
     if (this.state.matchPhase === "waiting") {
       if (!this.startTimer) {
-        this.startTimer = setTimeout(() => {
+        // Initialize matchTimer with countdown duration for 'waiting' phase
+        this.state.matchTimer = 3; 
+        
+        const countdownInterval = setInterval(() => {
           if (this.state.matchPhase === "waiting") {
-            this.state.matchPhase = "playing";
-            this.setupHazardsForMap();
+            this.state.matchTimer -= 1;
+            if (this.state.matchTimer <= 0) {
+              this.state.matchPhase = "playing";
+              this.state.matchTimer = 90; // Reset to match duration
+              this.setupHazardsForMap();
+              clearInterval(countdownInterval);
+              this.startTimer = null;
+            }
+          } else {
+            clearInterval(countdownInterval);
+            this.startTimer = null;
           }
-        }, 3000);
+        }, 1000);
+        this.startTimer = countdownInterval;
       }
     }
   }
 
-  onLeave(client: Client, consented: boolean) {
-    const player = this.state.players.find(p => p.id === client.sessionId);
+  onLeave(client: Client, code?: number) {
+    const player = this.state.players.find((p: Player) => p.id === client.sessionId);
     if (player) {
       player.alive = false;
     }
@@ -159,7 +172,7 @@ export class BattleRoom extends Room<GameState> {
         console.log("Bumper spawned at", bumper.x, bumper.y);
       }
 
-      const alivePlayers = this.state.players.filter(p => p.alive);
+      const alivePlayers = this.state.players.filter((p: Player) => p.alive);
       const totalPlayers = this.state.players.length;
       
       // Match ends if:
@@ -173,7 +186,7 @@ export class BattleRoom extends Room<GameState> {
           winnerName = alivePlayers[0].name;
         } else if (alivePlayers.length > 1) {
           // Tie-break by kills if timer ran out
-          const sorted = [...alivePlayers].sort((a, b) => b.kills - a.kills);
+          const sorted = [...alivePlayers].sort((a: Player, b: Player) => b.kills - a.kills);
           winnerName = sorted[0].name;
         }
 
@@ -186,8 +199,8 @@ export class BattleRoom extends Room<GameState> {
 
     // 3. Process buffered client inputs
     for (const [sessionId, buffered] of this.inputBuffer.entries()) {
-      const player = this.state.players.find(p => p.id === sessionId);
-      if (!player || !player.alive) continue;
+      const player = this.state.players.find((p: Player) => p.id === sessionId);
+      if (!player || !player.alive || this.state.matchPhase !== "playing") continue;
 
       if (buffered.length > 0) {
         const lastInput = buffered[buffered.length - 1];
@@ -206,7 +219,7 @@ export class BattleRoom extends Room<GameState> {
     // 4. Send acknowledgements
     for (const player of this.state.players) {
       if (this.lastSeq.has(player.id)) {
-        const client = this.clients.find(c => c.sessionId === player.id);
+        const client = this.clients.find((c: Client) => c.sessionId === player.id);
         if (client) {
           client.send("ack", { seq: this.lastSeq.get(player.id) });
         }
@@ -225,7 +238,7 @@ export class BattleRoom extends Room<GameState> {
         // Player just died!
         let killerName = "The Void";
         if (player.lastHitBy) {
-          const killer = this.state.players.find(p => p.id === player.lastHitBy);
+          const killer = this.state.players.find((p: Player) => p.id === player.lastHitBy);
           if (killer) {
             killer.kills++;
             killer.score += 100;

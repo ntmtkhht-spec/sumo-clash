@@ -193,14 +193,38 @@ joinBtn.addEventListener("click", () => {
   startLobby(username, mapId);
 });
 
+// Proactive wake-up for Render.com free tier
+async function wakeUpServer() {
+  const isDev = import.meta.env.DEV;
+  const serverUrl = import.meta.env.VITE_SERVER_URL || (isDev ? "ws://127.0.0.1:2567" : "wss://sumo-clash-server.onrender.com");
+  const httpUrl = serverUrl.replace("ws", "http");
+  
+  try {
+    console.log("[SUMO] Sending wake-up call to:", httpUrl + "/ping");
+    await fetch(httpUrl + "/ping");
+    console.log("[SUMO] Server is awake!");
+  } catch (e) {
+    console.warn("[SUMO] Wake-up call failed or server still sleeping:", e);
+  }
+}
+wakeUpServer();
+
 async function startLobby(username: string, mapId: string) {
   statusEl.innerText = "Connecting to matchmaking server...";
-  const client = new Client("wss://sumo-clash-server.onrender.com");
+  const isDev = import.meta.env.DEV;
+  const serverUrl = import.meta.env.VITE_SERVER_URL || (isDev ? "ws://127.0.0.1:2567" : "wss://sumo-clash-server.onrender.com");
+  
+  console.log(`[SUMO] Connecting to: ${serverUrl} (Dev: ${isDev})`);
+  statusEl.innerText = `Connecting to ${isDev ? 'Local' : 'Production'} Server...`;
+  
+  const client = new Client(serverUrl);
 
   try {
+    const startTime = Date.now();
     room = await client.joinOrCreate("battle", { username, mapId });
-    console.log("[SUMO] Room joined, sessionId:", room.sessionId);
-    statusEl.innerText = `Joined room successfully. Initializing renderer...`;
+    const duration = Date.now() - startTime;
+    console.log(`[SUMO] Room joined in ${duration}ms, sessionId:`, room.sessionId);
+    statusEl.innerText = `Connected in ${duration}ms! Initializing renderer...`;
 
     // Initialize PixiJS Application
     app = new Application();
@@ -253,6 +277,30 @@ async function startLobby(username: string, mapId: string) {
     });
     app.stage.addChild(scoreboardText);
 
+    // Large center countdown
+    const countdownText = new Text({
+      text: "",
+      style: {
+        fontFamily: "'Outfit', 'Inter', sans-serif",
+        fontSize: 120,
+        fontWeight: "900",
+        fill: 0xfacc15,
+        dropShadow: {
+            alpha: 0.5,
+            blur: 10,
+            distance: 4,
+            color: 0x000000
+        }
+      }
+    });
+    countdownText.anchor.set(0.5);
+    countdownText.x = window.innerWidth / 2;
+    countdownText.y = window.innerHeight / 2;
+    countdownText.visible = false;
+    app.stage.addChild(countdownText);
+    (app as any).countdownText = countdownText; // Attach to app for access in renderGame
+
+
     // Initial state copy
     localState = new GameState();
 
@@ -295,17 +343,20 @@ async function startLobby(username: string, mapId: string) {
           const dx = lPlayer.x - sPlayer.x;
           const dy = lPlayer.y - sPlayer.y;
 
-          if (Math.sqrt(dx * dx + dy * dy) > 1.0) {
+          // Increase threshold to 5.0 to avoid micro-jitter from float drift
+          if (Math.sqrt(dx * dx + dy * dy) > 5.0) {
             lPlayer.x = sPlayer.x;
             lPlayer.y = sPlayer.y;
             lPlayer.vx = sPlayer.vx;
             lPlayer.vy = sPlayer.vy;
+            lPlayer.stunTimer = sPlayer.stunTimer;
 
             const toReplay = pendingInputs.filter(item => item.seq > lastAckedSeq);
             for (const item of toReplay) {
               const inMap = new Map<string, PlayerInput>();
               inMap.set(room.sessionId, item.input);
-              stepPhysics(localState, inMap, 1 / 60);
+              // Pass false for updateGlobalState to only replay player movement
+              stepPhysics(localState, inMap, 1 / 60, false);
             }
           }
         } else {
@@ -327,11 +378,11 @@ async function startLobby(username: string, mapId: string) {
       localH.radius = h.radius || 30;
       localState?.hazards.push(localH);
       
-      h.onChange = () => {
+      h.onChange(() => {
         localH.x = h.x;
         localH.y = h.y;
         localH.radius = h.radius;
-      };
+      });
     };
 
     // Helper to add powerup to local state
@@ -345,7 +396,20 @@ async function startLobby(username: string, mapId: string) {
       localState?.powerups.push(localP);
     };
 
-    // Hazards/powerups rendered directly from room.state each frame — no onAdd needed.
+    // Sync hazards and powerups for local prediction
+    room.state.hazards.onAdd((h: any) => addLocalHazard(h));
+    room.state.hazards.onRemove((h: any) => {
+      if (!localState) return;
+      const idx = localState.hazards.findIndex(lh => lh.id === h.id);
+      if (idx !== -1) localState.hazards.splice(idx, 1);
+    });
+
+    room.state.powerups.onAdd((p: any) => addLocalPowerup(p));
+    room.state.powerups.onRemove((p: any) => {
+      if (!localState) return;
+      const idx = localState.powerups.findIndex(lp_pu => lp_pu.id === p.id);
+      if (idx !== -1) localState.powerups.splice(idx, 1);
+    });
 
     room.onMessage("ack", (message: { seq: number }) => {
       lastAckedSeq = message.seq;
@@ -376,8 +440,13 @@ async function startLobby(username: string, mapId: string) {
 
     setInterval(() => {
       if (!room || !localState) return;
+      
+      const isWaiting = localState.matchPhase === "waiting";
       const seq = nextSeq++;
-      const inputCopy = { ...currentInput };
+      
+      // If waiting, force all inputs to false
+      const inputCopy = isWaiting ? { up: false, down: false, left: false, right: false, dash: false } : { ...currentInput };
+
 
       const lp = localState.players.find(p => p.id === room.sessionId);
       if (inputCopy.dash && lp && lp.dashCooldown === 0) {
@@ -637,7 +706,42 @@ function renderGame() {
 
   const aliveCount = renderList.filter((p: any) => p?.alive).length;
   const objectCount = (room?.state?.hazards?.length || 0) + (room?.state?.powerups?.length || 0);
-  hudText.text = `SUMO CLASH\nMap: ${(localState?.mapId || "Classic").toUpperCase()}\nPlayers Alive: ${aliveCount}\nTime: ${Math.ceil(localState?.matchTimer || 0)}s\nObjects: ${objectCount}`;
+  const ping = room?.connection?.transport?.ping || 0;
+  
+  const isWaiting = localState?.matchPhase === "waiting";
+  const timerLabel = isWaiting ? "STARTS IN" : "TIME";
+  const timerVal = Math.ceil(localState?.matchTimer || 0);
+  
+  hudText.text = `SUMO CLASH\nMap: ${(localState?.mapId || "Classic").toUpperCase()}\nPlayers Alive: ${aliveCount}\n${timerLabel}: ${timerVal}s\nObjects: ${objectCount}\nPing: ${ping}ms`;
+  
+  const ct = (app as any).countdownText;
+  if (ct) {
+    if (isWaiting && timerVal > 0) {
+      ct.visible = true;
+      ct.text = timerVal.toString();
+      ct.x = window.innerWidth / 2;
+      ct.y = window.innerHeight / 2;
+      // Pulse effect
+      const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.1;
+      ct.scale.set(pulse);
+    } else if (localState?.matchPhase === "playing" && localState.matchTimer > 88) {
+        // Show "GO!" for 2 seconds
+        ct.visible = true;
+        ct.text = "GO!";
+        ct.style.fill = 0x4ade80; // Green
+        ct.x = window.innerWidth / 2;
+        ct.y = window.innerHeight / 2;
+        ct.scale.set(1.2);
+    } else {
+      ct.visible = false;
+    }
+  }
+
+  if (isWaiting) {
+    hudText.style.fill = 0xfacc15; // Yellow for countdown
+  } else {
+    hudText.style.fill = 0xffffff;
+  }
 
   } catch (err: any) {
     console.error("[renderGame] crash:", err);
