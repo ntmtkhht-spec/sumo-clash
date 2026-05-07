@@ -647,8 +647,8 @@ function renderGame() {
         spawnParticles(camPlayer.x, camPlayer.y, 15, 0xffffff, 1.5);
       }
       lastLocalVx = camPlayer.vx; lastLocalVy = camPlayer.vy;
-      ox = cx - (camPlayer.x + smoothOffsetX);
-      oy = cy - (camPlayer.y + smoothOffsetY);
+      ox = cx - camPlayer.x;
+      oy = cy - camPlayer.y;
     }
   }
 
